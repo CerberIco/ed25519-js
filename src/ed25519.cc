@@ -38,6 +38,102 @@ NAN_METHOD(MakeKeypair) {
 }
 
 /**
+ * MakeKeypairFromPrivate(Buffer secret)
+ * secret: A 32 byte buffer
+ * returns: an Object with PublicKey and PrivateKey
+ **/
+NAN_METHOD(MakeKeypairFromPrivate) {
+	Nan::HandleScope scope;
+	if ((info.Length() < 1) || (!Buffer::HasInstance(info[0])) || (Buffer::Length(info[0]->ToObject()) != 32)) {
+		return Nan::ThrowError("MakeKeypair requires a 32 byte buffer");
+	}
+	const unsigned char* secret = (unsigned char*)Buffer::Data(info[0]->ToObject());
+
+	v8::Local<v8::Object> privateKey = Nan::NewBuffer(64).ToLocalChecked();
+
+	unsigned char* privateKeyData = (unsigned char*)Buffer::Data(privateKey);
+
+	v8::Local<v8::Object> publicKey = Nan::NewBuffer(32).ToLocalChecked();
+	unsigned char* publicKeyData = (unsigned char*)Buffer::Data(publicKey);
+	for (int i = 0; i < 32; i++)
+		privateKeyData[i] = secret[i];
+	crypto_sign_keypair_from_private(publicKeyData, privateKeyData);
+
+	Local<Object> result = Nan::New<Object>();
+	result->Set(Nan::New("publicKey").ToLocalChecked(), publicKey);
+	result->Set(Nan::New("privateKey").ToLocalChecked(), privateKey);
+	info.GetReturnValue().Set(result);
+}
+
+/**
+ * SafeModL(Buffer number)
+ * number: A 32 byte buffer
+ * returns: a 32 byte buffer
+ **/
+NAN_METHOD(SafeModL) {
+		Nan::HandleScope scope;
+		if ((info.Length() < 1) || (!Buffer::HasInstance(info[0])) || (Buffer::Length(info[0]->ToObject()) != 32)) {
+			return Nan::ThrowError("SafeModL requires a 32 byte buffer");
+		}
+		unsigned char* number = (unsigned char*)Buffer::Data(info[0]->ToObject());
+		safe_modL(number);
+
+		v8::Local<v8::Object> res = Nan::NewBuffer(32).ToLocalChecked();
+		unsigned char* numData = (unsigned char*)Buffer::Data(res);
+		for (int i = 0; i < 32; i++) {
+			numData[i] = number[i];
+		}
+
+		info.GetReturnValue().Set(res);
+}
+
+/**
+ * PrivateKeyAdd(Buffer privateKey, Buffer tweak)
+ * privateKey: A 32 byte buffer
+ * tweak: A 32 byte buffer
+ * returns: an Object with PublicKey and PrivateKey
+ **/
+NAN_METHOD(PrivateKeyAdd) {
+		Nan::HandleScope scope;
+		if ((info.Length() < 2) || (!Buffer::HasInstance(info[0])) || (Buffer::Length(info[0]->ToObject()) != 32) ||
+			(!Buffer::HasInstance(info[1])) || (Buffer::Length(info[1]->ToObject()) != 32)) {
+			return Nan::ThrowError("PrivateKeyAdd requires a 32 byte buffer");
+		}
+		v8::Local<v8::Object> result = Nan::NewBuffer(32).ToLocalChecked();
+
+		unsigned char* privateKey = (unsigned char*)Buffer::Data(info[0]->ToObject());
+		unsigned char* tweak = (unsigned char*)Buffer::Data(info[1]->ToObject());
+		unsigned char* resultData = (unsigned char*)Buffer::Data(result);
+
+		private_keys_add(resultData, privateKey, tweak);
+
+		info.GetReturnValue().Set(result);
+}
+
+/**
+ * PublicKeyAdd(Buffer publicKey, Buffer tweak)
+ * publicKey: A 32 byte buffer
+ * tweak: A 32 byte buffer
+ * returns: an Object with PublicKey and PrivateKey
+ **/
+NAN_METHOD(PublicKeyAdd) {
+		Nan::HandleScope scope;
+		if ((info.Length() < 2) || (!Buffer::HasInstance(info[0])) || (Buffer::Length(info[0]->ToObject()) != 32) ||
+		(!Buffer::HasInstance(info[1])) || (Buffer::Length(info[1]->ToObject()) != 32)) {
+			return Nan::ThrowError("PublicKeyAdd requires a 32 byte buffer");
+		}
+		v8::Local<v8::Object> result = Nan::NewBuffer(32).ToLocalChecked();
+
+		unsigned char* publicKey = (unsigned char*)Buffer::Data(info[0]->ToObject());
+		unsigned char* tweak = (unsigned char*)Buffer::Data(info[1]->ToObject());
+		unsigned char* resultData = (unsigned char*)Buffer::Data(result);
+
+		public_key_add(resultData, publicKey, tweak);
+
+		info.GetReturnValue().Set(result);
+}
+
+/**
  * Sign(Buffer message, Buffer seed)
  * Sign(Buffer message, Buffer privateKey)
  * Sign(Buffer message, Object keyPair)
@@ -91,6 +187,50 @@ NAN_METHOD(Sign) {
 }
 
 /**
+ * SignByHDK(Buffer message, Buffer privateKey)
+ * SignByHDK(Buffer message, Object keyPair)
+ * message: the message to be signed
+ * seed: 32 byte buffer to make a keypair
+ * keyPair: the object from the MakeKeypair function
+ * returns: the signature as a Buffer
+ **/
+NAN_METHOD(SignByHDK) {
+	Nan::HandleScope scope;
+	unsigned char* privateKey;
+
+	if ((info.Length() < 2) || (!Buffer::HasInstance(info[0]->ToObject()))) {
+		return Nan::ThrowError("Sign requires (Buffer, {Buffer(64) | keyPair object})");
+	}
+
+	if ((Buffer::HasInstance(info[1])) && (Buffer::Length(info[1]->ToObject()) == 64)) {
+		privateKey = (unsigned char*)Buffer::Data(info[1]->ToObject());
+	} else if ((info[1]->IsObject()) && (!Buffer::HasInstance(info[1]))) {
+		Local<Value> privateKeyBuffer = info[1]->ToObject()->Get(Nan::New<String>("privateKey").ToLocalChecked())->ToObject();
+		if (!Buffer::HasInstance(privateKeyBuffer)) {
+			return Nan::ThrowError("Sign requires (Buffer, {Buffer(64) | keyPair object})");
+		}
+		privateKey = (unsigned char*)Buffer::Data(privateKeyBuffer);
+	} else {
+		return Nan::ThrowError("Sign requires (Buffer, {Buffer(64) | keyPair object})");
+	}
+	Handle<Object> message = info[0]->ToObject();
+	const unsigned char* messageData = (unsigned char*)Buffer::Data(message);
+	size_t messageLen = Buffer::Length(message);
+	unsigned long long sigLen = 64 + messageLen;
+	unsigned char *signatureMessageData = (unsigned char*) malloc(sigLen);
+	crypto_sign_hdk(signatureMessageData, &sigLen, messageData, messageLen, privateKey);
+
+	v8::Local<v8::Object> signature = Nan::NewBuffer(64).ToLocalChecked();
+	unsigned char* signatureData = (unsigned char*)Buffer::Data(signature);
+	for (int i = 0; i < 64; i++) {
+		signatureData[i] = signatureMessageData[i];
+	}
+
+	free(signatureMessageData);
+	info.GetReturnValue().Set(signature);
+}
+
+/**
  * Verify(Buffer message, Buffer signature, Buffer publicKey)
  * message: message the signature is for
  * signature: signature to be verified
@@ -119,8 +259,13 @@ NAN_METHOD(Verify) {
 
 void InitModule(Handle<Object> exports) {
 	Nan::SetMethod(exports, "MakeKeypair", MakeKeypair);
+	Nan::SetMethod(exports, "MakeKeypairFromPrivate", MakeKeypairFromPrivate);
+	Nan::SetMethod(exports, "PrivateKeyAdd", PrivateKeyAdd);
+	Nan::SetMethod(exports, "PublicKeyAdd", PublicKeyAdd);
 	Nan::SetMethod(exports, "Sign", Sign);
+	Nan::SetMethod(exports, "SignByHDK", SignByHDK);
 	Nan::SetMethod(exports, "Verify", Verify);
+	Nan::SetMethod(exports, "SafeModL", SafeModL);
 }
 
 NODE_MODULE(ed25519, InitModule)

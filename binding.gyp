@@ -46,6 +46,7 @@
         'src/ed25519/fe_pow22523.c',
         'src/ed25519/sc_reduce.c',
         'src/ed25519/sc_muladd.c',
+        'src/ed25519/util.c',
         'src/ed25519.cc'
       ],
       'conditions': [

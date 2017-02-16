@@ -1,6 +1,7 @@
 #include "ed25519.h"
 #include <openssl/sha.h>
 #include "ge.h"
+#include "fe.h"
 
 int crypto_sign_keypair(unsigned char *pk, unsigned char *sk)
 {
@@ -19,3 +20,16 @@ int crypto_sign_keypair(unsigned char *pk, unsigned char *sk)
   for (i = 0;i < 32;++i) sk[32 + i] = pk[i];
   return 0;
 }
+
+int crypto_sign_keypair_from_private(unsigned char *pk, unsigned char *sk)
+{
+  ge_p3 A;
+  int i;
+
+  ge_scalarmult_base(&A,sk);
+  ge_p3_tobytes(pk,&A);
+
+  for (i = 0;i < 32;++i) sk[32 + i] = pk[i];
+  return 0;
+}
+
